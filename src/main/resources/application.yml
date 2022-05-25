@@ -1,0 +1,7 @@
+micronaut:
+  application:
+    name: groupMessageStream
+netty:
+  default:
+    allocator:
+      max-order: 3
