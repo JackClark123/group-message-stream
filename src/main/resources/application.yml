@@ -5,3 +5,23 @@ netty:
   default:
     allocator:
       max-order: 3
+
+datasources:
+  default:
+    url: jdbc:cloudspanner:/projects/test/instances/my-instance-id/databases/database-id;autoConfigEmulator=true
+    driverClassName: com.google.cloud.spanner.jdbc.JdbcDriver
+    schema-generate: UPDATE
+
+jpa:
+  default:
+    entity-scan:
+      packages:
+        - 'com.beanstalk.core'
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        hbm2ddl:
+          auto: none
+        dialect: com.google.cloud.spanner.hibernate.SpannerDialect
+        show_sql: true

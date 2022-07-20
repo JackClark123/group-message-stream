@@ -1,18 +1,19 @@
 package controller;
 
-import beanstalk.bigtable.Beanstalk;
-import beanstalk.bigtable.CreateIfNotExists;
-import beanstalk.data.BeanstalkData;
-import beanstalk.data.types.GroupMember;
-import beanstalk.data.types.GroupMessage;
-import beanstalk.data.types.Identifier;
-import beanstalk.values.GatewayHeader;
-import beanstalk.values.Project;
-import beanstalk.values.Table;
+
+import com.beanstalk.core.bigtable.BeanstalkData;
+import com.beanstalk.core.spanner.entities.account.PublicAccount;
+import com.beanstalk.core.spanner.entities.group.BetGroup;
+import com.beanstalk.core.spanner.entities.group.BetGroupMember;
+import com.beanstalk.core.spanner.entities.group.BetGroupMessage;
+import com.beanstalk.core.spanner.entities.group.id.GroupMemberId;
+import com.beanstalk.core.spanner.repositories.BetGroupMemberRepository;
+import com.beanstalk.core.values.GatewayHeader;
 import com.google.cloud.bigtable.data.v2.BigtableDataClient;
 import com.google.cloud.bigtable.data.v2.BigtableDataSettings;
 import io.micronaut.context.event.ShutdownEvent;
 import io.micronaut.context.event.StartupEvent;
+import io.micronaut.http.annotation.Body;
 import io.micronaut.http.annotation.Header;
 import io.micronaut.runtime.event.annotation.EventListener;
 import io.micronaut.websocket.WebSocketBroadcaster;
@@ -21,41 +22,31 @@ import io.micronaut.websocket.annotation.OnClose;
 import io.micronaut.websocket.annotation.OnMessage;
 import io.micronaut.websocket.annotation.OnOpen;
 import io.micronaut.websocket.annotation.ServerWebSocket;
+import jakarta.inject.Inject;
 import pubsub.PubSubSubscription;
 
+import javax.validation.constraints.NotNull;
 import java.io.IOException;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 @ServerWebSocket("/")
 public class GroupMessageClient {
 
+    @Inject
+    BetGroupMemberRepository betGroupMemberRepository;
+
     private final WebSocketBroadcaster broadcaster;
 
     private final PubSubSubscription pubSubSubscription;
 
-    private BigtableDataClient dataClient;
-
     public GroupMessageClient(WebSocketBroadcaster broadcaster) {
         this.broadcaster = broadcaster;
         pubSubSubscription = new PubSubSubscription(broadcaster);
-
-        // Creates the settings to configure a bigtable data client.
-        BigtableDataSettings settings =
-                BigtableDataSettings.newBuilder().setProjectId(Project.PROJECT).setInstanceId(Table.INSTANCE).build();
-
-        // Creates a bigtable data client.
-        try {
-            dataClient = BigtableDataClient.create(settings);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
     }
 
     @EventListener
     public void onStartupEvent(StartupEvent event) {
-
-        CreateIfNotExists.tables(Project.PROJECT, Table.INSTANCE, Table.GROUP_MESSAGE, GroupMessage.class);
-
         System.out.println("Starting up");
         pubSubSubscription.start();
     }
@@ -67,20 +58,23 @@ public class GroupMessageClient {
     }
 
     @OnOpen
-    public void onOpen(WebSocketSession session, @Header(GatewayHeader.account) String accountID) {
+    public void onOpen(WebSocketSession session, @Header(GatewayHeader.account) UUID accountID) {
         System.out.println("Opened session");
     }
 
     @OnMessage
-    public void onMessage(String message, WebSocketSession session, @Header(GatewayHeader.account) String accountID) {
-        System.out.println(message);
+    public void onMessage(WebSocketSession session, @Header(GatewayHeader.account) UUID accountID, @Body @NotNull UUID groupId) {
+        System.out.println(groupId);
 
-        GroupMember groupMember = BeanstalkData.parse(message, GroupMember.class);
+        GroupMemberId groupMemberId = GroupMemberId.builder()
+                .publicAccount(PublicAccount.builder().id(accountID).build())
+                .betGroup(BetGroup.builder().id(groupId).build())
+                .build();
 
-        if (Beanstalk.isMember(dataClient, accountID, groupMember.getGroupId())) {
-            pubSubSubscription.toggleSubscription(groupMember, session.getId());
+        if (betGroupMemberRepository.existsById(groupMemberId)) {
+            pubSubSubscription.toggleSubscription(groupId, session.getId());
 
-            broadcaster.broadcastAsync(groupMember, isValid(session));
+            broadcaster.broadcastAsync("Listening to messages for bet group: " + groupId, isValid(session));
         }
 
     }

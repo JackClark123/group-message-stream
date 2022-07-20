@@ -1,13 +1,9 @@
 package pubsub;
 
-import beanstalk.data.BeanstalkData;
-import beanstalk.data.types.GroupMember;
-import beanstalk.data.types.GroupMessage;
-import beanstalk.data.types.Identifier;
-import beanstalk.data.types.OrderBookSafe;
-import beanstalk.values.OrderBookValue;
-import beanstalk.values.Project;
-import beanstalk.values.Table;
+
+
+import com.beanstalk.core.bigtable.BeanstalkData;
+import com.beanstalk.core.spanner.entities.group.BetGroupMessage;
 import com.google.api.gax.batching.FlowControlSettings;
 import com.google.api.gax.rpc.NotFoundException;
 import com.google.cloud.bigtable.data.v2.BigtableDataClient;
@@ -32,7 +28,7 @@ public class PubSubSubscription implements MessageReceiver {
 
     private ProjectSubscriptionName projectSubscriptionName;
 
-    private Map<Long, List<String>> subscribedIdentifiers;
+    private Map<UUID, List<String>> subscribedIdentifiers;
 
     public PubSubSubscription(WebSocketBroadcaster broadcaster) {
         this.broadcaster = broadcaster;
@@ -73,10 +69,6 @@ public class PubSubSubscription implements MessageReceiver {
             System.exit(1);
         }
 
-        // Creates the settings to configure a bigtable data client.
-        BigtableDataSettings settings =
-                BigtableDataSettings.newBuilder().setProjectId(Project.PROJECT).setInstanceId(Table.INSTANCE).build();
-
     }
 
     public void start() {
@@ -101,16 +93,16 @@ public class PubSubSubscription implements MessageReceiver {
 
         consumer.ack();
 
-        GroupMessage groupMessage = BeanstalkData.parse(msg, GroupMessage.class);
+        BetGroupMessage groupMessage = BeanstalkData.parse(msg, BetGroupMessage.class);
 
-        if (groupMessage != null && groupMessage.getIdentifier() != null && groupMessage.getIdentifier().getGroup() != null) {
-            for (String id : subscribedIdentifiers.get(groupMessage.getIdentifier().getGroup())) {
-                broadcaster.broadcastAsync(msg, isValid(groupMessage.getIdentifier().getGroup(), id));
+        if (groupMessage != null && groupMessage.getBetGroup() != null && groupMessage.getBetGroup().getId() != null) {
+            for (String id : subscribedIdentifiers.get(groupMessage.getBetGroup().getId())) {
+                broadcaster.broadcastAsync(msg, isValid(groupMessage.getBetGroup().getId(), id));
             }
         }
     }
 
-    private Predicate<WebSocketSession> isValid(Long groupId, String id) {
+    private Predicate<WebSocketSession> isValid(UUID groupId, String id) {
         return s -> subscribedIdentifiers.get(groupId).contains(id) && s.getId().equals(id);
     }
 
@@ -142,20 +134,17 @@ public class PubSubSubscription implements MessageReceiver {
         }
     }
 
-    public void toggleSubscription(GroupMember groupMember, String id) {
-        if (groupMember != null && groupMember.getGroupId() != null) {
+    public void toggleSubscription(UUID groupId, String id) {
+        if (!subscribedIdentifiers.containsKey(groupId)) {
+            subscribedIdentifiers.put(groupId, new ArrayList<>());
+        }
 
-            if (!subscribedIdentifiers.containsKey(groupMember.getGroupId())) {
-                subscribedIdentifiers.put(groupMember.getGroupId(), new ArrayList<>());
-            }
-
-            if (!subscribedIdentifiers.get(groupMember.getGroupId()).contains(id)) {
-                System.out.println("Adding " + id + " to " + groupMember.getGroupId());
-                subscribedIdentifiers.get(groupMember.getGroupId()).add(id);
-            } else {
-                System.out.println("Removing " + id + " from " + groupMember.getGroupId());
-                subscribedIdentifiers.get(groupMember.getGroupId()).remove(id);
-            }
+        if (!subscribedIdentifiers.get(groupId).contains(id)) {
+            System.out.println("Adding " + id + " to " + groupId);
+            subscribedIdentifiers.get(groupId).add(id);
+        } else {
+            System.out.println("Removing " + id + " from " + groupId);
+            subscribedIdentifiers.get(groupId).remove(id);
         }
     }
 
